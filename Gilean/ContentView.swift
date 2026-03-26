@@ -12,6 +12,7 @@ struct ContentView: View {
     private enum LoadedVolume {
         case nifti(NIfTIImage)
         case mgh(MGHImage)
+        case afni(AFNIImage)
     }
 
     @State private var selectedURL: URL?
@@ -23,6 +24,7 @@ struct ContentView: View {
 
     private let niftiReader = NIfTIReader()
     private let mghReader = MGHFileReader()
+    private let afniReader = AFNIFileReader()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -43,9 +45,9 @@ struct ContentView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("NIfTI Header Inspector")
+                Text("Volume Header Inspector")
                     .font(.title.bold())
-                Text("Choose a NIfTI or MGH volume, or drop one onto the window.")
+                Text("Choose a NIfTI, MGH, or AFNI volume, or drop one onto the window.")
                     .foregroundStyle(.secondary)
             }
 
@@ -62,7 +64,7 @@ struct ContentView: View {
         VStack(spacing: 10) {
             Image(systemName: "square.and.arrow.down.on.square")
                 .font(.system(size: 28, weight: .medium))
-            Text("Drop a `.nii`, `.hdr`, `.img`, `.mgh`, or `.mgz` file here")
+            Text("Drop a `.nii`, `.nii.gz`, `.hdr`, `.img`, `.mgh`, `.mgz`, `.HEAD`, or `.BRIK(.gz)` file here")
                 .font(.headline)
             Text("The selected file is read with the native readers and the header details appear below.")
                 .multilineTextAlignment(.center)
@@ -83,7 +85,7 @@ struct ContentView: View {
         if isLoading {
             HStack(spacing: 12) {
                 ProgressView()
-                Text("Reading NIfTI file...")
+                Text("Reading volume file...")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else if let volume = loadedVolume {
@@ -158,6 +160,35 @@ struct ContentView: View {
                                 infoRow("FoV", formattedFloat(parameters.fieldOfView))
                             }
                         }
+
+                    case let .afni(image):
+                        infoSection("Image") {
+                            infoRow("Dimensions", image.dimensions.map(String.init).joined(separator: " x "))
+                            infoRow("Sub-Bricks", "\(image.brickCount)")
+                            infoRow("Voxel Sizes", formattedVector(image.voxelSizes))
+                            infoRow("Time Step", image.timeStep.map(formattedFloat) ?? "Unavailable")
+                            infoRow("Stored Bytes", "\(image.rawData.count)")
+                        }
+
+                        infoSection("Datatype") {
+                            infoRow("Type", image.brickTypeName)
+                            infoRow("Code", "\(image.brickTypeCode)")
+                            infoRow("Byte Order", image.byteOrder)
+                            infoRow("Brick Float Factors", image.brickFloatFactors.isEmpty ? "Unavailable" : formattedVector(image.brickFloatFactors))
+                        }
+
+                        infoSection("Space") {
+                            infoRow("Template Space", image.templateSpace ?? "Unavailable")
+                            infoRow("Volume Labels", image.volumeLabels.joined(separator: ", "))
+                        }
+
+                        if !image.affineRows.isEmpty {
+                            infoSection("Affine") {
+                                ForEach(Array(image.affineRows.enumerated()), id: \.offset) { index, row in
+                                    infoRow("Row \(index)", formattedVector(row))
+                                }
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -173,7 +204,7 @@ struct ContentView: View {
             ContentUnavailableView(
                 "No File Loaded",
                 systemImage: "doc.text.magnifyingglass",
-                description: Text("Use the file picker or drag a NIfTI file into the drop area to inspect its header.")
+                description: Text("Use the file picker or drag a NIfTI, MGH, or AFNI file into the drop area to inspect its header.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -300,6 +331,10 @@ struct ContentView: View {
     }
 
     private func loadVolume(at url: URL) throws -> LoadedVolume {
+        if AFNIFileReader.isSupportedFile(url) {
+            return .afni(try afniReader.readImage(at: url))
+        }
+
         if MGHFileReader.isSupportedFile(url) {
             return .mgh(try mghReader.readImage(at: url))
         }
@@ -313,6 +348,8 @@ struct ContentView: View {
             return "NIfTI"
         case .mgh:
             return "MGH/MGZ"
+        case .afni:
+            return "AFNI BRIK/HEAD"
         }
     }
 
